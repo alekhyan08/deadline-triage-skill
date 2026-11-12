@@ -81,13 +81,14 @@ def triage(request):
                 else:raise ValueError()
                 dates.add(value)
             except ValueError:invalid=True
-        phrases=[]
+        phrases=[];label_dates=set(dates)
         for match in PHRASE.finditer(text):
             try:
                 value=_phrase_date(match,received.astimezone(zone).date())
                 for other in ANY_DATE.finditer(text[match.end():match.end()+60]):
                     if _phrase_date(other,received.astimezone(zone).date())!=value:raise ValueError()
-                dates.add(value);phrases.append(match.group(0).strip())
+                dates.add(value)
+                if value not in label_dates:phrases.append(match.group(0).strip())
             except ValueError:invalid=True
         deadline=None;evidence=None
         if resolved:priority='resolved';evidence=resolved.group(0).strip()
@@ -107,8 +108,24 @@ def triage(request):
             'method':'Latest delivered thread evidence; explicit deadline/status labels and full-date due phrases only. No mail actions.'}
 
 
+LABELS={'overdue':'OVERDUE','due_today':'DUE TODAY','due_soon':'DUE SOON','scheduled':'SCHEDULED','needs_review':'NEEDS REVIEW','resolved':'RESOLVED'}
+
+
+def format_text(result):
+    """One readable line per thread, most urgent first; excerpts only, never instructions."""
+    lines=[f"Deadline triage as of {result['local_date']} ({result['timezone']}): {len(result['items'])} thread(s)"]
+    for number,item in enumerate(result['items'],1):
+        subject=' '.join(item['subject'].split())[:90]
+        when=item['deadline'] or 'no explicit date'
+        star='* ' if item['thread_starred'] else ''
+        evidence=f'  evidence: "{item["evidence"][:80]}"' if item['evidence'] and item['priority']!='resolved' else ''
+        lines.append(f"{number}. {LABELS[item['priority']]}  {when}  {star}{subject}  [{item['source_id']}]{evidence}")
+    return '\n'.join(lines)
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--input',type=Path)
+    parser.add_argument('--text',action='store_true',help='print a readable ranked list instead of JSON')
     args=parser.parse_args()
     try:
         if args.input:
@@ -119,6 +136,6 @@ def main():
     except (ValueError,KeyError,TypeError,OSError):
         print(json.dumps({'success':False,'error':'Invalid, incomplete or unsupported export; no action taken.'}))
         return 2
-    print(json.dumps({'success':True,**result},ensure_ascii=True));return 0
+    print(format_text(result) if args.text else json.dumps({'success':True,**result},ensure_ascii=True));return 0
 
 if __name__=='__main__':raise SystemExit(main())
