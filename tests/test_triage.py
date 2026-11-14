@@ -39,7 +39,7 @@ class TriageTests(unittest.TestCase):
             self.assertEqual(self.first(self.message(body=body))["deadline"], deadline, body)
 
     def test_never_guesses(self):
-        for body in ("due by Friday, 14 November 2026", "due 13 November", "due by 13 November 2026 or maybe 15 November 2026",
+        for body in ("due by Friday, 14 November 2026", "due by Monday 13 November", "due by 13 November 2026 or maybe 15 November 2026",
                      "Please finish next Friday", "Deadline: 2026-13-44", "Deadline: 2026-11-11\nDeadline: 2026-11-12"):
             row = self.first(self.message(body=body))
             self.assertEqual(row["priority"], "needs_review", body)

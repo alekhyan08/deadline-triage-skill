@@ -21,7 +21,7 @@ Deadline triage as of 2026-11-12 (America/Los_Angeles): 3 thread(s)
 3. NEEDS REVIEW  no explicit date  Newsletter  [m2]
 ```
 ## What it understands
-`Deadline:` / `Due:` lines (ISO date, `today`, `tomorrow`), full-date phrases like "due by Friday, 13 November 2026 at 17:00", `Status: resolved` lines; the latest message in a thread wins; weekday/date mismatches are refused.
+`Deadline:` / `Due:` lines and due/deadline phrases (subject or body) with a full date ("due by Friday, 13 November 2026 at 17:00"), a day and month without a year ("due Fri 13 Nov"), a numeric date ("due 11/20") or a weekday ("due Friday"), plus `today`, `tomorrow` and `Status: resolved` lines; a missing year is taken from the message's received date; the latest message in a thread wins; weekday/date mismatches and ambiguous numbers are refused. **v1.1.0** adds the year-less, weekday and numeric forms and subject scanning.
 
 ## Tests
 `python3 -m unittest discover -s tests`

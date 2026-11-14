@@ -1,7 +1,7 @@
 ---
 name: deadline-triage
 description: Rank a supplied mailbox export by explicit deadlines, using the latest message in each thread and keeping the source evidence. Use when asked what is due, which emails have deadlines, or to triage deadlines from exported mail. Read-only: it does not connect to mail, send anything or guess dates.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # Deadline triage
@@ -14,11 +14,11 @@ Deterministic Python helper, standard library only, no network, no credentials.
 - Not for general summaries, replying, scheduling or anything that needs a guess about a date.
 
 ## What it understands
-- `Deadline:` or `Due:` lines holding an ISO date (`2026-11-13`), `today` or `tomorrow` (relative to the message's received date).
-- Full-date phrases next to the words due/deadline, e.g. "due by Friday, 13 November 2026 at 17:00" or "deadline is November 15, 2026". A weekday that does not match the date makes the item `needs_review`.
+- `Deadline:` or `Due:` lines holding a date (`2026-11-13`, `13 Nov`, `Nov 13`, `11/13`), a weekday (`Friday`), `today` or `tomorrow` (relative to the message's received date).
+- Phrases next to the words due/deadline, in the subject or body: a full date ("due by Friday, 13 November 2026 at 17:00"), a day and month without a year ("due Fri 13 Nov", "due Nov 20"), a numeric date ("due 11/20"), or a weekday ("due Friday"). A date without a year takes the year nearest the message's received date (60 days before to 300 days after); a weekday alone means its next occurrence. A weekday that does not match the date makes the item `needs_review`; so does a number such as `3/4` that could be day-first or month-first.
 - `Status: resolved` / `cancelled` / `no action` lines.
 - The **latest message in a thread** wins, so a later correction overrides an old deadline; drafts never override delivered mail.
-- Anything incomplete, conflicting or unstructured ("next Friday", "13 November" without a year, two different dates) stays `needs_review`. It never presents a guessed date as extracted.
+- Anything incomplete, conflicting or unstructured ("next Friday", two different dates, "3/4") stays `needs_review`. It never presents a guessed date as extracted.
 
 ## How to run
 Provide one JSON object on stdin or with `--input`:

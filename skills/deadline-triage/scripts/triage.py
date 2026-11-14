@@ -17,25 +17,55 @@ MONTHS.update({m[:3]:i for m,i in list(MONTHS.items())})
 MONTHS['sept']=9
 WEEKDAYS={d:i for i,d in enumerate(('monday','tuesday','wednesday','thursday','friday','saturday','sunday'))}
 WEEKDAYS.update({d[:3]:i for d,i in list(WEEKDAYS.items())})
-DATE=(r'(?:(?P<wd>[A-Za-z]{3,9})\.?,?\s+)?(?:(?P<d1>\d{1,2})\s+(?P<m1>[A-Za-z]{3,9})\.?,?\s+(?P<y1>\d{4})'
-      r'|(?P<m2>[A-Za-z]{3,9})\.?\s+(?P<d2>\d{1,2}),?\s+(?P<y2>\d{4})|(?P<iso>\d{4}-\d{2}-\d{2}))\b')
-PHRASE=re.compile(r'\b(?:due|deadline)\b(?:\s+(?:is|date))?\s*(?:by|on|before|:)?\s*(?:'+DATE+r'|(?P<rel>today|tomorrow)\b)',re.I)
+MON=r'(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)'
+DATE=(r'(?:(?P<wd>[A-Za-z]{3,9})\.?,?\s+)?(?:(?P<d1>\d{1,2})(?:st|nd|rd|th)?\s+(?P<m1>'+MON+r')\b\.?(?:,?\s+(?P<y1>\d{4}))?'
+      r'|(?P<m2>'+MON+r')\b\.?\s+(?P<d2>\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(?P<y2>\d{4}))?|(?P<iso>\d{4}-\d{2}-\d{2})|(?P<n1>\d{1,2})/(?P<n2>\d{1,2})(?:/(?P<ny>\d{4}|\d{2}))?)(?!\w)')
+WDONLY=r'(?P<wdo>monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tues?|wed|thu(?:rs?)?|fri|sat|sun)\b\.?'
+PHRASE=re.compile(r'\b(?:due|deadline)\b(?:\s+(?:is|date))?\s*(?:by|on|before|:)?\s*(?:'+DATE+r'|(?P<rel>today|tomorrow)\b|'+WDONLY+r')',re.I)
 ANY_DATE=re.compile(DATE,re.I)
+LABEL_DATE=re.compile(r'(?:'+DATE+r'|'+WDONLY+r')',re.I)
 
 
 def _phrase_date(match,received_day):
-    """One explicit date from a due/deadline phrase, or ValueError when it is not exact."""
-    rel=match.groupdict().get('rel')
-    if rel:
-        return received_day+timedelta(days=int(rel.lower()=='tomorrow'))
-    if match.group('iso'):value=date.fromisoformat(match.group('iso'))
+    """One date from a due/deadline phrase, or ValueError when it is not exact. A day-month without a year takes the
+    nearest year to the message date; a weekday alone means its next occurrence; a weekday that contradicts the date is rejected."""
+    groups=match.groupdict()
+    if groups.get('rel'):
+        return received_day+timedelta(days=int(groups['rel'].lower()=='tomorrow'))
+    if groups.get('wdo'):
+        key=groups['wdo'].lower()
+        index=WEEKDAYS.get(key) if key in WEEKDAYS else WEEKDAYS.get({'tues':'tue','thur':'thu','thurs':'thu'}.get(key,key[:3]))
+        if index is None:raise ValueError()
+        return received_day+timedelta(days=(index-received_day.weekday())%7)
+    weekday=match.group('wd');wd=WEEKDAYS.get(weekday.lower()) if weekday else None
+    if groups.get('iso'):
+        value=date.fromisoformat(groups['iso'])
+        if wd is not None and wd!=value.weekday():raise ValueError()
+        return value
+    if groups.get('n1'):
+        first,second=int(groups['n1']),int(groups['n2'])
+        if first<=12<second:month_number,day=first,second
+        elif second<=12<first:month_number,day=second,first
+        elif first==second<=12:month_number,day=first,second
+        else:raise ValueError()  # both could be the month, or neither can: never guess
+        year=groups.get('ny');year=str(2000+int(year)) if year and len(year)==2 else year
     else:
-        month=(match.group('m1') or match.group('m2')).lower().rstrip('.')
+        month=(groups.get('m1') or groups.get('m2')).lower().rstrip('.')
         if month not in MONTHS:raise ValueError()
-        value=date(int(match.group('y1') or match.group('y2')),MONTHS[month],int(match.group('d1') or match.group('d2')))
-    weekday=match.group('wd')
-    if weekday and weekday.lower() in WEEKDAYS and WEEKDAYS[weekday.lower()]!=value.weekday():raise ValueError()
-    return value
+        month_number=MONTHS[month]
+        day=int(groups.get('d1') or groups.get('d2'));year=groups.get('y1') or groups.get('y2')
+    if year:
+        value=date(int(year),month_number,day)
+        if wd is not None and wd!=value.weekday():raise ValueError()
+        return value
+    options=[]
+    for candidate_year in (received_day.year-1,received_day.year,received_day.year+1):
+        try:candidate=date(candidate_year,month_number,day)
+        except ValueError:continue
+        if wd is not None and wd!=candidate.weekday():continue
+        if -60<=(candidate-received_day).days<=300:options.append(candidate)  # near the message date only
+    if not options:raise ValueError()
+    return min(options,key=lambda c:abs((c-received_day).days))
 
 
 def _stamp(value):
@@ -78,14 +108,18 @@ def triage(request):
                 if lower in ('today','tomorrow'):
                     value=received.astimezone(zone).date()+timedelta(days=int(lower=='tomorrow'))
                 elif re.fullmatch(r'\d{4}-\d{2}-\d{2}',label):value=date.fromisoformat(label)
-                else:raise ValueError()
+                else:
+                    found=LABEL_DATE.match(label)
+                    if not found:raise ValueError()
+                    value=_phrase_date(found,received.astimezone(zone).date())
                 dates.add(value)
             except ValueError:invalid=True
         phrases=[];label_dates=set(dates)
-        for match in PHRASE.finditer(text):
+        scan=row['subject']+'\n'+text
+        for match in PHRASE.finditer(scan):
             try:
                 value=_phrase_date(match,received.astimezone(zone).date())
-                for other in ANY_DATE.finditer(text[match.end():match.end()+60]):
+                for other in ANY_DATE.finditer(scan[match.end():match.end()+60]):
                     if _phrase_date(other,received.astimezone(zone).date())!=value:raise ValueError()
                 dates.add(value)
                 if value not in label_dates:phrases.append(match.group(0).strip())
@@ -105,7 +139,7 @@ def triage(request):
     rank={p:i for i,p in enumerate(('overdue','due_today','due_soon','needs_review','scheduled','resolved'))}
     output.sort(key=lambda r:(rank[r['priority']],not r['thread_starred'],r['deadline'] or '',r['source_id']))
     return {'local_date':str(today),'timezone':str(zone),'items':output,
-            'method':'Latest delivered thread evidence; explicit deadline/status labels and full-date due phrases only. No mail actions.'}
+            'method':'Latest delivered thread evidence; explicit deadline/status labels and due/deadline phrases with a date (year inferred from the message date) or a weekday, in subject or body; contradictions are never guessed. No mail actions.'}
 
 
 LABELS={'overdue':'OVERDUE','due_today':'DUE TODAY','due_soon':'DUE SOON','scheduled':'SCHEDULED','needs_review':'NEEDS REVIEW','resolved':'RESOLVED'}
